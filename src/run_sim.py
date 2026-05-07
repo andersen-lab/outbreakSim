@@ -1,3 +1,7 @@
+from pathlib import Path
+import random
+from collections import defaultdict, deque
+from Bio import SeqIO
 import covasim as cv
 import covasim.data as cvdata
 import numpy as np
@@ -8,6 +12,19 @@ import epyestim.covid19 as covid19
 import networkx as nx
 from networkx.drawing.nx_pydot import graphviz_layout
 import argparse
+
+from molecular_clock import molecular_clock_evolve
+from substitution_model import JukesCantor
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_REFERENCE = _REPO_ROOT / "assets" / "NC_045512_Hu-1.fasta"
+
+
+def load_fasta_sequence(path: Path) -> str:
+    """Load the first FASTA record as a single uppercase nucleotide string."""
+    record = next(SeqIO.parse(path, "fasta"))
+    return str(record.seq).upper()
+
 
 def define_sim_parameters(pop_size, pop_type,
                           n_days, location,
@@ -121,6 +138,49 @@ def viral_shedding_covasim(sim,start,end):
             regional_viral_load[t, r] += viral_load_matrix[t, p]
     return regional_viral_load
 
+def assign_sequences(sim, reference):
+    sub_model = JukesCantor()
+    seq_rng = random.Random(42)
+
+    df = pd.DataFrame(sim.people.infection_log)
+    df.to_csv('infection_log.tsv', sep='\t')
+    infection_date = df.groupby("target", sort=False)["date"].first().to_dict()
+
+    seed_ids = df.loc[df["date"] == 0, "target"].values
+
+    children = defaultdict(list)
+    for _, row in df[df["source"].notna()].iterrows():
+        s, t = int(row["source"]), int(row["target"])
+        children[s].append(t)
+    seq_by_node = {s: reference for s in seed_ids}
+    queue = deque(seed_ids)
+    while queue:
+        #print(len(seq_by_node.keys()))
+        print(len(queue))
+        u = queue.popleft()
+
+        parent_seq = seq_by_node[u]
+        for v in children[u]:
+            if v not in seq_by_node:
+                branch_time = float(infection_date[v] - infection_date[u])
+                seq_by_node[v] = molecular_clock_evolve(
+                    parent_seq,
+                    branch_time,
+                    rate=0.001,
+                    model=sub_model,
+                    rng=seq_rng,
+                )
+            queue.append(v)
+
+    def _sequence_for_target(x):
+        if pd.isna(x):
+            return pd.NA
+        return seq_by_node.get(int(x), pd.NA)
+
+    df["sequence"] = df["target"].map(_sequence_for_target)
+
+    return df
+    
 
 def plot_shedding(data,name):
     fig, ax = plt.subplots(figsize=(6,10))
@@ -169,6 +229,8 @@ def main():
                         help="Row index for where the infection initiated (default: 0)")
     parser.add_argument("--c_init_inf", type=int, default=0,
                         help="column index for where the infection initiated (default: 0)")
+    parser.add_argument("--reference", type=Path, default=_DEFAULT_REFERENCE,
+                        help="Path to reference genome FASTA (default: NC_045512_Hu-1.fasta)")
 
     args = parser.parse_args()
     ### STEP 1 ####
@@ -188,7 +250,7 @@ def main():
     n_rows, n_cols = args.n_rows, args.n_cols
     n_regions = n_rows * n_cols
     # Assign people to each region
-    sim = assign_people(sim, n_regions, args.n_days)
+    sim = assign_people(sim, n_regions, args.pop_size)
     # initiate infection
     # 20 initial infections in Region_0_0
     sim = initiate_infection(sim, args.r_init_inf, args.c_init_inf, args.n_init_inf)
@@ -204,6 +266,9 @@ def main():
     # plot values
     plot_shedding(shedding_simple,"simple")
     plot_shedding(shedding_covasim,"covasim")
+
+    reference_seq = load_fasta_sequence(args.reference)
+    print(assign_sequences(sim, reference_seq))
 
 
 if __name__ == "__main__":
