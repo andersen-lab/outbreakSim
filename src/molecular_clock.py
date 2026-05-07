@@ -37,6 +37,6 @@ def molecular_clock_evolve(
     for i, nt in enumerate(out):
         n_events = poisson(rng, lam)
         for _ in range(n_events):
-            nt = model.substitute_nucleotide(nt, rng)
+            nt = model.substitute_nucleotide(ref_nt=nt, rng=rng)
         out[i] = nt
     return "".join(out)
