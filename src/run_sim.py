@@ -47,14 +47,15 @@ def assign_people(sim, n_regions, pop_size):
     return sim
 
 
-def initiate_infection(sim, row_index, col_index, n_infected):
-    sim.people.infect(inds=np.where(sim.people.region == row_index)[col_index][:n_infected])
+def initiate_infection(sim, region_id):
+    sim.people.infect(inds=np.where(sim.people.region == region_id))
     return sim
 
 
 def calculate_new_infections(sim, n_regions):
     new_cases = np.zeros((len(sim.results['new_infections']), n_regions))
     for t in range(len(sim.results['new_infections'])):
+        # infected in each time point
         newly_infected = np.where(sim.people.date_infectious == t)[0]
         for r in range(n_regions):
             new_cases[t, r] = np.sum(sim.people.region[newly_infected] == r)
@@ -188,10 +189,10 @@ def main():
     n_rows, n_cols = args.n_rows, args.n_cols
     n_regions = n_rows * n_cols
     # Assign people to each region
-    sim = assign_people(sim, n_regions, args.n_days)
+    sim = assign_people(sim, n_regions, args.pop_size)
     # initiate infection
     # 20 initial infections in Region_0_0
-    sim = initiate_infection(sim, args.r_init_inf, args.c_init_inf, args.n_init_inf)
+    sim = initiate_infection(sim, 0)
     sim.run()
     #### STEP 2 ####
     # calculate number of new cases in each region
