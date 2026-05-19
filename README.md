@@ -11,7 +11,7 @@ This project uses **Covasim** to simulate the spread of COVID-19 within a define
 Install Covasim via pip:
 
 ```bash
-pip install covasim
+pip install -r requirements.txt
 ```
 
 ---

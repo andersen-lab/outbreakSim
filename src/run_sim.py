@@ -1,3 +1,7 @@
+from os import sep
+from pathlib import Path
+import random
+from Bio import SeqIO
 import covasim as cv
 import covasim.data as cvdata
 import numpy as np
@@ -8,6 +12,19 @@ import epyestim.covid19 as covid19
 import networkx as nx
 from networkx.drawing.nx_pydot import graphviz_layout
 import argparse
+
+from molecular_clock import molecular_clock_evolve
+from substitution_model import JukesCantor
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_REFERENCE = _REPO_ROOT / "assets" / "NC_045512_Hu-1.fasta"
+
+
+def load_fasta_sequence(path: Path) -> str:
+    """Load the first FASTA record as a single uppercase nucleotide string."""
+    record = next(SeqIO.parse(path, "fasta"))
+    return str(record.seq).upper()
+
 
 def define_sim_parameters(pop_size, pop_type,
                           n_days, location,
@@ -122,6 +139,52 @@ def viral_shedding_covasim(sim,start,end):
             regional_viral_load[t, r] += viral_load_matrix[t, p]
     return regional_viral_load
 
+def assign_sequences(sim, reference):
+    sub_model = JukesCantor()
+    seq_rng = random.Random(42)
+
+    df = pd.DataFrame(sim.people.infection_log)
+    df.to_csv('infection_log.tsv', sep='\t')
+    # Track each person's currently carried lineage so reinfections can replace it.
+    person_current_seq = {}
+    person_current_start_date = {}
+
+    # Store sequence by transmission event (source -> target).
+    event_seq_by_row = {}
+
+    # Process in temporal order so parent lineage state is up to date.
+    for idx, row in df.sort_values("date", kind="stable").iterrows():
+        target = int(row["target"])
+        event_date = float(row["date"])
+
+        if pd.isna(row["source"]):
+            event_seq_by_row[idx] = reference
+            person_current_seq[target] = reference
+            person_current_start_date[target] = event_date
+            continue
+
+        source = int(row["source"])
+        parent_seq = person_current_seq.get(source, reference)
+        parent_start_date = person_current_start_date.get(source, event_date)
+        branch_time = max(0.0, event_date - parent_start_date)
+
+        child_seq = molecular_clock_evolve(
+            parent_seq,
+            branch_time,
+            rate=1e-7,  # mutations per site per day
+            model=sub_model,
+            rng=seq_rng,
+        )
+
+        event_seq_by_row[idx] = child_seq
+        person_current_seq[target] = child_seq
+        person_current_start_date[target] = event_date
+
+    df["sequence"] = pd.Series(event_seq_by_row)
+
+    return df
+    
+
 
 def plot_shedding(data,name):
     fig, ax = plt.subplots(figsize=(6,10))
@@ -170,6 +233,8 @@ def main():
                         help="Row index for where the infection initiated (default: 0)")
     parser.add_argument("--c_init_inf", type=int, default=0,
                         help="column index for where the infection initiated (default: 0)")
+    parser.add_argument("--reference", type=Path, default=_DEFAULT_REFERENCE,
+                        help="Path to reference genome FASTA (default: NC_045512_Hu-1.fasta)")
 
     args = parser.parse_args()
     ### STEP 1 ####
@@ -199,13 +264,20 @@ def main():
     new_cases = calculate_new_infections(sim, n_regions)
     # calculate wastewater shedding per region per time point using
     # basic shedding model
-    shedding_simple = viral_shedding_simple(new_cases)
-    # covasim viral load model (adjust zero if start date is not day 0)
-    shedding_covasim = viral_shedding_covasim(sim,0,args.n_days)
+    # shedding_simple = viral_shedding_simple(new_cases)
+    # # covasim viral load model (adjust zero if start date is not day 0)
+    # shedding_covasim = viral_shedding_covasim(sim,0,args.n_days)
     # plot values
-    plot_shedding(shedding_simple,"simple")
-    plot_shedding(shedding_covasim,"covasim")
+    # plot_shedding(shedding_simple,"simple")
+    # plot_shedding(shedding_covasim,"covasim")
 
+    reference_seq = load_fasta_sequence(args.reference)
+    
+    transmission_df = assign_sequences(sim, reference_seq)
+
+    print(transmission_df['sequence'].nunique())
+    
+    transmission_df.to_csv("transmission.tsv", sep='\t')
 
 if __name__ == "__main__":
     main()
