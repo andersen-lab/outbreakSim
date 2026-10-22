@@ -231,11 +231,12 @@ ax2.set_xlabel('Simulation day')
 ax2.set_ylabel('Proportion of infectious agents')
 ax2.set_title('Variant proportion over time — scaled to 1')
 ax2.set_ylim(0, 1)
+ax2.set_xlim(tvec[0], tvec[-1]) # The axis runs from the first to the last simulated day (shared with the top panel)
 ax2.legend(loc='upper left', framealpha=0.9)
-
 plt.tight_layout()
 plt.savefig(f'{plot_dir}/03_variants_counts_and_proportions.pdf')
 plt.close()
+
 
 # %% [markdown]
 # ## Amplicon sequencing snapshot with Bygul
