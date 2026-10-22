@@ -404,7 +404,7 @@ panels = [
         ax_ww,
         sewershed_gdf,
         'shedding_per_capita',
-        'Cumulative viral shedding per capita',
+        'Cumulative Wastewater viral load (a.u.)',
         'Wastewater: by sewershed',
     ),
 ]
@@ -558,7 +558,7 @@ panels = [
         sewershed_gdf,
         wastewater_ts,
         'Wastewater (by sewershed)',
-        'Viral shedding per capita',
+        'Wastewater viral load (a.u.)',
     ),
 ]
 for ax, gdf, ts, title, label in panels:
