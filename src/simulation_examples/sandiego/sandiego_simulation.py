@@ -9,7 +9,7 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__))) # So the relative data paths below resolve
 
-plot_dir = 'tut_outputs' # All plots are saved here as PDFs instead of being shown
+plot_dir = 'outputs' # All plots are saved here as PDFs instead of being shown
 os.makedirs(plot_dir, exist_ok=True)
 
 # %% [markdown]
@@ -18,7 +18,7 @@ os.makedirs(plot_dir, exist_ok=True)
 # Please follow the instructions here https://github.com/andersen-lab/covasim4wastewater to install.
 # (Full covasim tutorial available at : https://docs.covasim.org/tutorials/)
 # 2. To start, we run a basic simulation: 20,000 people with 20 initial infections for 100 days. The contact network is "rank", meaning people mostly contact others who live near them: the chance of a contact falls with how many people live closer (the nearest person has rank 1). People are placed using a population-density raster, so they cluster where people actually live. There are no imported cases.
-# 3. People are placed on a map using the San Diego files in `san-diego-data/` (built from ZIP-code polygons and a ZIP-to-treatment-plant table by `make_sewershed_map.py`):
+# 3. People are placed on a map using the San Diego files in `data/` (built from ZIP-code polygons and a ZIP-to-treatment-plant table by `make_sewershed_map.py`):
 #    * `sandiego_zip_boundaries.geojson` — one region per ZIP code, with `region_code` and `region_name`. People are assigned to regions and given home coordinates inside them. An optional `population` column weights the regions by population; this file has none, so regions are weighted by area (and covasim warns about it).
 #    * `sandiego_sewersheds.geojson` — one catchment polygon per treatment plant, with a `sid` property (the plant name). Each person is assigned the sewershed containing their home; people outside every sewershed get -1.
 #    * `san_diego_county_ppp_2020.tif` — WorldPop 2020 people per ~100 m pixel (EPSG:4326), passed as `density_raster`. Agents are placed in proportion to this raster, but only inside the region polygons. Make it with `clip_worldpop.py`.
@@ -35,12 +35,12 @@ import matplotlib.pyplot as plt
 sim = cv.Sim(
     pop_size=20_000,
     pop_type='rank',
-    density_raster='san-diego-data/san_diego_county_ppp_2020.tif',
+    density_raster='data/san_diego_county_ppp_2020.tif',
     pop_infected=20,
     n_days=100,
     n_imports=0,
-    boundary_shapefile='san-diego-data/sandiego_zip_boundaries.geojson',
-    sewershed_file='san-diego-data/sandiego_sewersheds.geojson',
+    boundary_shapefile='data/sandiego_zip_boundaries.geojson',
+    sewershed_file='data/sandiego_sewersheds.geojson',
 )
 sim.run()
 
@@ -99,18 +99,18 @@ plt.close()
 # * **Tracking infections:** To track variant proportions over time, we pull daily counts directly from `sim.results['variant']['n_infectious_by_variant']`—Covasim's built-in tracker for daily infectious cases per variant.
 # * **Wastewater sampling:** The `WastewaterSampler` tool isn't needed to plot these infection numbers; it's used only to generate the haplotype-resolved data required for Bygul (covered in the next section).
 #
-# > **Note:** Make sure to run this notebook from the `docs/tutorials/` directory so Covasim can find the FASTA files located in `sars-2-data/variants/`.
+# > **Note:** Make sure to run this notebook from the `docs/tutorials/` directory so Covasim can find the FASTA files located in `data/sars-2-data/variants/`.
 
 # %%
 
 
 # Paths are relative to docs/tutorials/ — run the notebook from that directory.
-ref_fasta         = 'sars-2-data/NC_045512_Hu-1.fasta'
-fitness_data_path = '../../data/nt_fitness.csv'
-ay4_fasta         = 'sars-2-data/variants/AY.4_consensus.fasta'
-ba2_fasta         = 'sars-2-data/variants/BA.2.9_consensus.fasta'
-xbb15_fasta       = 'sars-2-data/variants/XBB.1.5.18_consensus.fasta'
-artic_primers     = 'sars-2-data/ARTIC_V4-1.bed'
+ref_fasta         = 'data/sars-2-data/NC_045512_Hu-1.fasta'
+fitness_data_path = 'data/sars-2-data/nt_fitness.csv'
+ay4_fasta         = 'data/sars-2-data/variants/AY.4_consensus.fasta'
+ba2_fasta         = 'data/sars-2-data/variants/BA.2.9_consensus.fasta'
+xbb15_fasta       = 'data/sars-2-data/variants/XBB.1.5.18_consensus.fasta'
+artic_primers     = 'data/sars-2-data/ARTIC_V4-1.bed'
 
 # Variants — rel_beta is NOT hard-coded.  evo_pars (below) derives the
 # transmission advantage from each variant's founding mutations by looking up
@@ -252,7 +252,7 @@ plt.close()
 # amplicon-sequencing dataset that reflects the simulated epidemiology.
 #
 # > **Requires** the `bygul` package: `pip install bygul`  (installing through conda is recommended conda install bioconda::bygul)
-# > BED file and reference FASTA are read from `sars-2-data/` via the paths
+# > BED file and reference FASTA are read from `data/sars-2-data/` via the paths
 # > set in the earlier cell (`artic_primers`, `ref_fasta`).
 
 # %%
@@ -343,11 +343,11 @@ dual = cv.Sim(
         pop_infected = 20,
         n_days       = 100,
         pop_type     = 'rank',
-        density_raster = 'san-diego-data/san_diego_county_ppp_2020.tif',
+        density_raster = 'data/san_diego_county_ppp_2020.tif',
         evo_pars     = dict(enable=True, reference=ref_fasta, mol_clock_rate=1e-6,
                             fitness_model='bloom_nt', fitness_data_path=fitness_data_path, fitness_scale=0.05),
-        boundary_shapefile = 'san-diego-data/sandiego_zip_boundaries.geojson',
-        sewershed_file     = 'san-diego-data/sandiego_sewersheds.geojson',
+        boundary_shapefile = 'data/sandiego_zip_boundaries.geojson',
+        sewershed_file     = 'data/sandiego_sewersheds.geojson',
     ),
     variants      = [ay4],
     interventions = [cv.test_prob(symp_prob=0.2, start_day=0)],
@@ -371,10 +371,10 @@ for day in sample_days:
 # %%
 import geopandas as gpd
 
-sewershed_gdf = gpd.read_file('san-diego-data/sandiego_sewersheds.geojson')
+sewershed_gdf = gpd.read_file('data/sandiego_sewersheds.geojson')
 # people.sewershed holds integer IDs; sim.sewershed_labels gives {integer ID: original sid}
 sewershed_gdf['sid_num'] = sewershed_gdf['sid'].map({sid: i for i, sid in dual.sewershed_labels.items()})
-region_gdf = gpd.read_file('san-diego-data/sandiego_zip_boundaries.geojson')
+region_gdf = gpd.read_file('data/sandiego_zip_boundaries.geojson')
 region_gdf['region_num'] = region_gdf['region_code'].astype(int) # people.region holds the integer region codes
 
 from matplotlib.patches import Patch
@@ -443,9 +443,9 @@ small = cv.Sim(
     pop_infected       = 20,
     n_days             = 100,
     pop_type           = 'rank',
-    density_raster     = 'san-diego-data/san_diego_county_ppp_2020.tif',
-    boundary_shapefile = 'san-diego-data/sandiego_zip_boundaries.geojson',
-    sewershed_file     = 'san-diego-data/sandiego_sewersheds.geojson',
+    density_raster     = 'data/san_diego_county_ppp_2020.tif',
+    boundary_shapefile = 'data/sandiego_zip_boundaries.geojson',
+    sewershed_file     = 'data/sandiego_sewersheds.geojson',
     interventions      = [cv.test_prob(symp_prob=0.2, start_day=0)],
     analyzers          = [RecordViralLoad(label='viral_load')],
     verbose            = 0,
@@ -496,7 +496,7 @@ ax_agents.set_title('Agents')
 ax_agents.set_axis_off()
 
 panels = [(ax_clinical, region_gdf, clinical_ts, 'Clinical (by ZIP code)', 'New diagnoses per 1,000 residents'),
-          (ax_wastewater, sewershed_gdf, wastewater_ts, 'Wastewater (by sewershed)', 'Viral shedding per capita')]
+          (ax_wastewater, sewershed_gdf, wastewater_ts, 'Wastewater (by sewershed)', 'Wastewater viral load (a.u.)')]
 for ax, gdf, ts, title, label in panels:
     gdf['value'] = np.nan_to_num(ts[:, 0]) # Plot without gaps so every polygon is in one collection; blanks come from NaN in the later frames
     gdf.plot(column='value', cmap='YlOrRd', vmin=0, vmax=np.nanmax(ts), edgecolor='0.3', ax=ax)
