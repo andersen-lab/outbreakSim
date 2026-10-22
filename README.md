@@ -20,10 +20,3 @@ pip install covasim
 
 * `src/simulation_examples` example simulation runs in different regions
 
-
----
-## How to run the code
-
-```python
-python src/run_sim.py --pop_size 100 --pop_type hybrid --n_days 180 --location zambia
-```
