@@ -683,3 +683,170 @@ def update(day):
     fig.suptitle(f'Day {day}')
 
 save_gif(fig, update, n_days, f'{plot_dir}/07_transmission_phylogeny_over_time.gif')
+
+# %% [markdown]
+# ## Lineage prevalence: clinical sequencing vs wastewater (Bygul + Freyja)
+#
+# The same epidemic seen through both surveillance streams, with all three variants introduced (days 30, 60, 100) and tracked over the whole simulation:
+# * **Clinical:** every week, 50 of the cases diagnosed in the past 7 days are sequenced. (`ClinicalSequencer`'s default `diagnosed` pool is everyone ever diagnosed, including people who recovered long ago, so it lags the epidemic; `RecentDiagnosisSequencer` below only draws from new diagnoses.) Each case's lineage is its variant label (as a lab would assign with e.g. Pangolin), and prevalence is the fraction of the week's sequenced cases in each lineage.
+# * **Wastewater:** every week, `WastewaterSampler` snapshots the shedding-weighted haplotype mixture. The top haplotypes go to Bygul to synthesise ARTIC V4.1 amplicon reads, which are mapped to the reference with minimap2 and passed through `freyja variants` and `freyja demix --autoadapt` (which sets the adaptive lasso penalty from the sample's error profile). Freyja's lineage abundances (e.g. BA.2.9, XBB.1.5.18, XBB.1) are grouped into the simulated variant families; anything that fits no family is shown as "other".
+#
+# > **Requires** `freyja`, `samtools`, `ivar` and `minimap2` on the PATH (in the csim env: `pip install freyja` and `micromamba install -c bioconda samtools`). Freyja results are cached in `outputs/08_freyja_demix.csv`; delete it to re-run the (slow) read simulation.
+
+# %%
+import re, subprocess, tempfile, shutil
+import pandas as pd
+
+surv_days = list(range(7, 183, 7)) # weekly, from day 7 to the end of the simulation
+n_top_haplotypes = 20              # haplotypes passed to Bygul per sample (renormalised)
+surv_variants = ['wild', 'AY.4', 'BA.2', 'XBB.1.5']
+
+class RecentDiagnosisSequencer(cv.Analyzer):
+    '''Each sampling day, sequence a random sample of the cases diagnosed in the last `window` days; records their variant labels'''
+
+    def __init__(self, days, n_samples, window=7, label=None):
+        super().__init__(label=label)
+        self.days, self.n_samples, self.window = set(days), n_samples, window
+        self.labels = {} # day -> variant label of each sequenced case
+
+    def initialize(self, sim):
+        super().initialize(sim)
+        self.rng = np.random.default_rng(sim['rand_seed'])
+
+    def apply(self, sim):
+        if sim.t not in self.days:
+            return
+        ppl = sim.people
+        recent = np.nonzero(ppl.date_diagnosed > sim.t - self.window)[0] # date_diagnosed is NaN for the undiagnosed
+        recent = recent[ppl.date_diagnosed[recent] <= sim.t]
+        if len(recent) == 0:
+            return
+        chosen = self.rng.choice(recent, size=min(self.n_samples, len(recent)), replace=False)
+        names = sim['variant_map']
+        variant = np.where(np.isnan(ppl.infectious_variant), ppl.recovered_variant, ppl.infectious_variant) # Covasim moves the variant to recovered_variant on recovery
+        self.labels[sim.t] = [names.get(int(variant[i]), 'wild') if not np.isnan(variant[i]) else 'wild' for i in chosen]
+
+surv = cv.Sim(
+    dict(
+        pop_size     = 20_000,
+        pop_infected = 20,
+        start_day    = '2022-10-01',
+        end_day      = '2023-04-01',
+        evo_pars     = dict(enable=True, reference=ref_fasta, mol_clock_rate=1e-6,
+                            fitness_model='bloom_nt', fitness_data_path=fitness_data_path, fitness_scale=0.05),
+    ),
+    variants      = [ay4, ba2, xbb15],
+    interventions = [cv.test_prob(symp_prob=0.2, start_day=0)],
+    analyzers     = [RecentDiagnosisSequencer(days=surv_days, n_samples=50, label='clinical'),
+                     cv.WastewaterSampler(days=surv_days, label='wastewater')],
+    verbose       = 0,
+)
+surv.run()
+surv_clinical = surv.get_analyzer('clinical')
+surv_ww = surv.get_analyzer('wastewater')
+
+# %% [markdown]
+# Clinical lineage prevalence, and the true shedding-weighted prevalence in the wastewater (the answer Freyja is trying to recover).
+
+# %%
+clinical_rows, truth_rows = [], []
+for release_day, labels in surv_clinical.labels.items():
+    counts = pd.Series(labels).value_counts()
+    for v in surv_variants:
+        clinical_rows.append(dict(day=release_day, lineage=v, prevalence=counts.get(v, 0)/counts.sum()))
+for day, smp in surv_ww.samples.items():
+    if smp is None:
+        continue
+    total = sum(smp.variant_shedding.values())
+    for v in surv_variants:
+        truth_rows.append(dict(day=day, lineage=v, prevalence=smp.variant_shedding.get(v, 0)/total))
+clinical_df, truth_df = pd.DataFrame(clinical_rows), pd.DataFrame(truth_rows)
+
+# %% [markdown]
+# Wastewater: Bygul reads -> minimap2 -> Freyja, for each sampled day.
+
+# %%
+def lineage_family(lineage):
+    '''Group a Freyja lineage into the simulated variant family it descends from'''
+    if lineage in ('A', 'B'):                                     return 'wild'    # Wuhan-Hu-1 era lineages
+    if lineage.startswith('AY.') or lineage == 'B.1.617.2':       return 'AY.4'    # Delta
+    if lineage.startswith('XBB'):                                 return 'XBB.1.5'
+    if lineage == 'BA.2' or lineage.startswith('BA.2.'):          return 'BA.2'
+    return 'other'
+
+def run_freyja(day, workdir):
+    '''Simulate amplicon reads for a sampled day, map them, and return Freyja's {lineage: abundance}'''
+    smp = surv_ww.samples[day]
+    order = sorted(range(smp.n_genotypes), key=lambda i: smp.proportions[i], reverse=True)[:n_top_haplotypes]
+    props = np.array([smp.proportions[i] for i in order])
+    props = props / props.sum()
+    surv_ww.samples[day] = dataclasses.replace(
+        smp,
+        mutation_sets  = [smp.mutation_sets[i] for i in order],
+        variant_labels = [smp.variant_labels[i] for i in order],
+        proportions    = list(props[:-1]) + [1.0 - props[:-1].sum()],
+        raw_loads      = [smp.raw_loads[i] for i in order],
+        n_genotypes    = len(order),
+    )
+    try:
+        reads = os.path.join(workdir, 'reads')
+        surv_ww.simulate_sample(day=day, primers=artic_primers, reference=ref_fasta, outdir=reads,
+                                readcnt=300, redo=True, simulation_mode='amplicon', seed=42)
+        bam, var, depth, out = (os.path.join(workdir, f) for f in ('s.bam', 's.var', 's.depth', 's.demix'))
+        subprocess.run(f'minimap2 -ax sr {ref_fasta} {reads}/reads_1.fastq {reads}/reads_2.fastq 2>/dev/null | samtools sort -o {bam} -',
+                       shell=True, check=True)
+        subprocess.run(['freyja', 'variants', bam, '--variants', var, '--depths', depth, '--ref', ref_fasta],
+                       check=True, capture_output=True)
+        subprocess.run(['freyja', 'demix', var + '.tsv', depth, '--autoadapt', '--output', out], check=True, capture_output=True)
+    finally:
+        surv_ww.samples[day] = smp # restore the full sample
+    result = pd.read_csv(out, sep='\t', index_col=0).iloc[:, 0]
+    return dict(zip(result['lineages'].split(), map(float, result['abundances'].split())))
+
+freyja_csv = f'{plot_dir}/08_freyja_demix.csv' # day, Freyja lineage, abundance
+if os.path.exists(freyja_csv):
+    freyja_df = pd.read_csv(freyja_csv)
+else:
+    freyja_rows = []
+    for day in sorted(d for d, smp in surv_ww.samples.items() if smp is not None):
+        with tempfile.TemporaryDirectory() as workdir:
+            freyja_rows += [dict(day=day, lineage=l, abundance=a) for l, a in run_freyja(day, workdir).items()]
+        print(f'Freyja: day {day} done')
+    freyja_df = pd.DataFrame(freyja_rows)
+    freyja_df.to_csv(freyja_csv, index=False)
+
+freyja_df['family'] = freyja_df['lineage'].map(lineage_family)
+ww_df = freyja_df.groupby(['day', 'family'])['abundance'].sum().unstack(fill_value=0).reindex(columns=surv_variants + ['other'], fill_value=0)
+ww_df = ww_df.div(ww_df.sum(axis=1), axis=0) # Freyja abundances sum to ~1 already; renormalise any unassigned remainder
+
+# %% [markdown]
+# Stacked areas of lineage prevalence: clinical (top) above wastewater (bottom), on the same time axis.
+
+# %%
+def wide(df):
+    return df.pivot(index='day', columns='lineage', values='prevalence').reindex(columns=surv_variants).sort_index()
+
+clin_w = wide(clinical_df)
+fig, (ax_c, ax_w) = plt.subplots(2, 1, figsize=(10, 7), sharex=True, sharey=True)
+for ax, tbl, title in [(ax_c, clin_w, 'Clinical: lineages of sequenced cases (50 recent diagnoses per week)'),
+                       (ax_w, ww_df, 'Wastewater: Freyja lineage abundances from Bygul amplicon reads')]:
+    cols = [c for c in tbl.columns if tbl[c].any()]
+    ax.stackplot(tbl.index, tbl[cols].T, labels=cols,
+                 colors=[palette.get(c, '0.7') for c in cols], alpha=0.85)
+    # for vname, day in intro_days.items():
+    #     ax.axvline(day, color='white', linestyle=':', linewidth=1.5, alpha=0.9)
+    ax.set_title(title)
+    ax.set_ylabel('Lineage prevalence')
+    ax.set_ylim(0, 1)
+ax_w.set_xlabel('Simulation day')
+ax_w.set_xlim(min(clin_w.index.min(), ww_df.index.min()), surv_days[-1])
+handles, labels = ax_w.get_legend_handles_labels()
+ax_c.legend(handles, labels, loc='upper left', framealpha=0.9)
+plt.tight_layout()
+plt.savefig(f'{plot_dir}/08_lineage_prevalence_clinical_vs_wastewater.pdf')
+plt.close()
+
+# How close is Freyja to the simulation's truth? (mean absolute error in prevalence, per lineage family)
+truth_w = wide(truth_df)
+err = (ww_df[surv_variants].reindex(truth_w.index) - truth_w).abs().mean()
+print('Freyja vs true shedding-weighted prevalence, mean absolute error:\n', err.round(3).to_string())
