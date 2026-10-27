@@ -32,3 +32,16 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * sequence evolution, with variants seeded from real genomes and transmissibility derived from their mutations
 * clinical and wastewater samplers, and amplicon read simulation with Bygul
 * an infection log for building transmission phylogenies
+
+
+## Definitions and calculations
+
+* Rescaling: 
+- Parameters : `pop_scale`=1, `scaled_pop`= None, `rescale`=TRUE, `rescale_threshold`=0.05, `rescale_factor`=1.02
+- Functions: `rescale(self)`
+- Depends on: `self.people.false('naive')`= who can get infected?,`self['pop_size']` how many agents?
+- What it does: In Covasim, **`pop_scale`** is how many real people each simulated agent represents, giving you the total **`scaled_pop`** size. When **`rescale`** is turned on, the model watches for when too many agents catch the virus or get vaccinated—once that number hits the **`rescale_threshold`**, it uses the **`rescale_factor`** to prune non-susceptible agents and bump up the scale, keeping the simulation fast without running out of memory.
+
+## Basic disease transmission
+- Parameters: `beta`=0.016,`n_import`=0 (there will be random number of infected cases drawn from a poisson distribution even if set to zero),`beta_dist`='neg_binomial', par1=1.0, par2=0.45, step=0.01,`viral_dist`=frac_time=0.3, load_ratio=2, high_cap=4, `asymp_factor`=1
+- what is does: transmission is set and controlled using a combination of a baseline transmissibility parameter (beta), network layer weights (beta_layer), intrahost viral dynamics, and modifying factor
