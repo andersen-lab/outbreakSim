@@ -34,14 +34,49 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * an infection log for building transmission phylogenies
 
 
-## Definitions and calculations
+## Definitions and Calculations
 
-* Rescaling: 
-- Parameters : `pop_scale`=1, `scaled_pop`= None, `rescale`=TRUE, `rescale_threshold`=0.05, `rescale_factor`=1.02
-- Functions: `rescale(self)`
-- Depends on: `self.people.false('naive')`= who can get infected?,`self['pop_size']` how many agents?
-- What it does: In Covasim, **`pop_scale`** is how many real people each simulated agent represents, giving you the total **`scaled_pop`** size. When **`rescale`** is turned on, the model watches for when too many agents catch the virus or get vaccinated—once that number hits the **`rescale_threshold`**, it uses the **`rescale_factor`** to prune non-susceptible agents and bump up the scale, keeping the simulation fast without running out of memory.
+### Population Setup & Generation
 
-## Basic disease transmission
-- Parameters: `beta`=0.016,`n_import`=0 (there will be random number of infected cases drawn from a poisson distribution even if set to zero),`beta_dist`='neg_binomial', par1=1.0, par2=0.45, step=0.01,`viral_dist`=frac_time=0.3, load_ratio=2, high_cap=4, `asymp_factor`=1
-- what is does: transmission is set and controlled using a combination of a baseline transmissibility parameter (beta), network layer weights (beta_layer), intrahost viral dynamics, and modifying factor
+* **Key Parameters:** `pop_size = 20e3`, `pop_infected = 20`, `pop_type = random`, `location = None (seattle)`
+* **Core Functions:** `make_people`, `assign_sewersheds`, `make_synthpop`, `make_randpop`
+* **Process:** These functions create people depending on the population type provided. Before generating people, the system checks if the user provided population data.
+* **Synthpop:** Population type `synthpop` uses [synthpops GitHub repository](https://github.com/synthpops/synthpops). This only supports a few locations and is not being maintained anymore, but it outputs a structured synthetic population with realistic demographic details—such as age, sex, and household size—mapped onto realistic interaction networks across households, schools, workplaces, long-term care facilities, and general community spaces. Instead of generating random contacts, it uses real census data to simulate how people actually group and interact in everyday life, providing the underlying contact network that disease models use to track transmission.
+
+### Contact Layers & Person Attributes
+
+* **Location Effects:** By default, when a location is specified, age and household size data are also used.
+* **Contact Layers:** There are 4 key contact types in the population:
+* Household = `h`
+* Schools = `s`
+* Workplace = `w`
+* Random contact = `c`
+* *Note:* `layers_defaults` holds these values for each contact type.
+
+
+* **Person Attributes:** Once created, each individual contains: `uid`, `age`, `sex`, and `contacts`.
+* **Prognoses & Spatial Data:** Prognoses are set by default for different age bins, along with regions and coordinates. Once people are created, they are also assigned a sewershed based on their coordinates.
+
+---
+
+## Contacts
+
+* **Core Functions:** `make_random_contacts`, `make_hybrid_contacts`, `make_rank_based_contacts`
+* **`make_random_contacts`:** Every person needs on average $N$ contacts. By default, it uses a Poisson distribution centered at $N$ to decide how many contacts each person gets. If a dispersion factor is used, it switches to a negative binomial distribution to account for superspreading events. Dispersion is `None` by default.
+* **`make_hybrid_contacts`:** Makes networks across different social layers. Exact contact information is set by the `reset_layer_pars` function per `pop_type` (`h`, `s`, `w`, `c`), with school and work ages defined as `[6, 22]` and `[22, 65]` respectively.
+
+---
+
+## Rescaling
+
+* **Parameters:** `pop_scale = 1`, `scaled_pop = None`, `rescale = TRUE`, `rescale_threshold = 0.05`, `rescale_factor = 1.02`
+* **Function:** `rescale(self)`
+* **Dependencies:** `self.people.false('naive')` (who can get infected?), `self['pop_size']` (how many agents?)
+* **What it does:** In Covasim, **`pop_scale`** determines how many real people each simulated agent represents, giving you the total **`scaled_pop`** size. When **`rescale`** is turned on, the model watches for when too many agents catch the virus or get vaccinated—once that number hits the **`rescale_threshold`**, it uses the **`rescale_factor`** to prune non-susceptible agents and bump up the scale, keeping the simulation fast without running out of memory.
+
+---
+
+## Basic Disease Transmission
+
+* **Parameters:** `beta = 0.016`, `n_import = 0` (there will be a random number of infected cases drawn from a Poisson distribution even if set to zero), `beta_dist = 'neg_binomial'`, `par1 = 1.0`, `par2 = 0.45`, `step = 0.01`, `viral_dist = frac_time = 0.3`, `load_ratio = 2`, `high_cap = 4`, `asymp_factor = 1`
+* **What it does:** Transmission is set and controlled using a combination of a baseline transmissibility parameter (`beta`), network layer weights (`beta_layer`), intrahost viral dynamics, and modifying factors.
