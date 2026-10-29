@@ -34,7 +34,7 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * an infection log for building transmission phylogenies
 
 
-## Definitions and Calculations
+# Definitions and Calculations
 
 ### Population Setup & Generation
 
@@ -43,17 +43,19 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * **Process:** These functions create people depending on the population type provided. Before generating people, the system checks if the user provided population data.
 * **Synthpop:** Population type `synthpop` uses [synthpops GitHub repository](https://github.com/synthpops/synthpops). This only supports a few locations and is not being maintained anymore, but it outputs a structured synthetic population with realistic demographic details—such as age, sex, and household size—mapped onto realistic interaction networks across households, schools, workplaces, long-term care facilities, and general community spaces. Instead of generating random contacts, it uses real census data to simulate how people actually group and interact in everyday life, providing the underlying contact network that disease models use to track transmission.
 
+---
+
 ### Contact Layers & Person Attributes
 
-* **Location Effects:** By default, when a location is specified, age and household size data are also used.
+* **Location Effects:** By default, when a location is specified, age and household size data are also used. If location is not specified, then Seattle data is used.
 * **Contact Layers:** There are 4 key contact types in the population:
 * Household = `h`
 * Schools = `s`
 * Workplace = `w`
 * Random contact = `c`
-* *Note:* `layers_defaults` holds these values for each contact type.
 
 
+* **Note:** `layers_defaults` holds these values for each contact type.
 * **Person Attributes:** Once created, each individual contains: `uid`, `age`, `sex`, and `contacts`.
 * **Prognoses & Spatial Data:** Prognoses are set by default for different age bins, along with regions and coordinates. Once people are created, they are also assigned a sewershed based on their coordinates.
 
@@ -64,6 +66,23 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * **Core Functions:** `make_random_contacts`, `make_hybrid_contacts`, `make_rank_based_contacts`
 * **`make_random_contacts`:** Every person needs on average $N$ contacts. By default, it uses a Poisson distribution centered at $N$ to decide how many contacts each person gets. If a dispersion factor is used, it switches to a negative binomial distribution to account for superspreading events. Dispersion is `None` by default.
 * **`make_hybrid_contacts`:** Makes networks across different social layers. Exact contact information is set by the `reset_layer_pars` function per `pop_type` (`h`, `s`, `w`, `c`), with school and work ages defined as `[6, 22]` and `[22, 65]` respectively.
+
+### Hybrid Contact Structure
+
+* It starts off with making contacts in the household (`make_microstructured_contacts` = clustering people into families with a cluster size drawn from a poisson distribution), then making random contacts between everyone (`make_random_contacts`).
+* Then it identifies the individuals that fall into work age and school age. From there, it creates random contacts for each of these groups. So household contacts are structured but not school or work places.
+
+### Rank Contact Structure
+
+* If the `pop_type` rank is used, it first makes sure that people have coordinates, if they do, we will convert lonlat to km using `lonlat_to_km`. If not, it will assign them coordinates using `assign_density_based_coords`.
+* Then the rank based contacts are calculated with a mean set as default `pars['contacts']` for "random" which is 20.
+* Given the current structure of the code, it does not look like dispersion can be defined as a parameter. The default for dispersion is none, in both `make_rand_contact` and `rank_based_contact`.
+* The logic is assigns coordinates based on a density raster file which is provided by the user.
+
+### Dynamic Layers Note
+
+* It is important to note that we can also set layers to be dynamic, meaning that in the specific layer such as "h" the contacts stay the same throughout the simulation.
+* Default values for both random and hybrid is set to zero, meaning that in all layers the contacts stay the same and not change throughout the time.
 
 ---
 
