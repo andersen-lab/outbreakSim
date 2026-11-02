@@ -33,19 +33,20 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * clinical and wastewater samplers, and amplicon read simulation with Bygul
 * an infection log for building transmission phylogenies
 
-
 # Definitions and Calculations
 
-### Population Setup & Generation
+---
+
+## 1. Population Setup & Generation
 
 * **Key Parameters:** `pop_size = 20e3`, `pop_infected = 20`, `pop_type = random`, `location = None (seattle)`
 * **Core Functions:** `make_people`, `assign_sewersheds`, `make_synthpop`, `make_randpop`
 * **Process:** These functions create people depending on the population type provided. Before generating people, the system checks if the user provided population data.
-* **Synthpop:** Population type `synthpop` uses [synthpops GitHub repository](https://github.com/synthpops/synthpops). This only supports a few locations and is not being maintained anymore, but it outputs a structured synthetic population with realistic demographic details—such as age, sex, and household size—mapped onto realistic interaction networks across households, schools, workplaces, long-term care facilities, and general community spaces. Instead of generating random contacts, it uses real census data to simulate how people actually group and interact in everyday life, providing the underlying contact network that disease models use to track transmission.
+* **Synthpop:** Population type `synthpop` uses the [synthpops GitHub repository](https://github.com/synthpops/synthpops). This only supports a few locations and is not being maintained anymore, but it outputs a structured synthetic population with realistic demographic details—such as age, sex, and household size—mapped onto realistic interaction networks across households, schools, workplaces, long-term care facilities, and general community spaces. Instead of generating random contacts, it uses real census data to simulate how people actually group and interact in everyday life, providing the underlying contact network that disease models use to track transmission.
 
 ---
 
-### Contact Layers & Person Attributes
+## 2. Contact Layers & Person Attributes
 
 * **Location Effects:** By default, when a location is specified, age and household size data are also used. If location is not specified, then Seattle data is used.
 * **Contact Layers:** There are 4 key contact types in the population:
@@ -61,7 +62,7 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 
 ---
 
-## Contacts
+## 3. Contacts
 
 * **Core Functions:** `make_random_contacts`, `make_hybrid_contacts`, `make_rank_based_contacts`
 * **`make_random_contacts`:** Every person needs on average $N$ contacts. By default, it uses a Poisson distribution centered at $N$ to decide how many contacts each person gets. If a dispersion factor is used, it switches to a negative binomial distribution to account for superspreading events. Dispersion is `None` by default.
@@ -86,7 +87,7 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 
 ---
 
-## Rescaling
+## 4. Rescaling
 
 * **Parameters:** `pop_scale = 1`, `scaled_pop = None`, `rescale = TRUE`, `rescale_threshold = 0.05`, `rescale_factor = 1.02`
 * **Function:** `rescale(self)`
@@ -95,7 +96,47 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 
 ---
 
-## Basic Disease Transmission
+## 5. Basic Disease Transmission
 
 * **Parameters:** `beta = 0.016`, `n_import = 0` (there will be a random number of infected cases drawn from a Poisson distribution even if set to zero), `beta_dist = 'neg_binomial'`, `par1 = 1.0`, `par2 = 0.45`, `step = 0.01`, `viral_dist = frac_time = 0.3`, `load_ratio = 2`, `high_cap = 4`, `asymp_factor = 1`
-* **What it does:** Transmission is set and controlled using a combination of a baseline transmissibility parameter (`beta`), network layer weights (`beta_layer`), intrahost viral dynamics, and modifying factors.
+* **What it does:** The probability of transmission from an *infectious* person to a *susceptible* person, also known as infectiousness or transmissibility. The overall transmission probability depends on the network *layer* two people are connected by, as well as the infected person's *viral load*, the susceptible person's age, and other factors.
+
+### Viral Load Calculation (`compute_viral_load`)
+
+* The `compute_viral_load` function dynamically calculates the relative transmissibility of infected individuals at any given timestep `t` by modeling how viral load evolves over the course of an infection. It first determines each person's infection duration by evaluating their start date against their endpoint (either recovery or death), and then divides this timeline into an initial high-load phase and a subsequent low-load phase, subject to a maximum cap (`high_cap`) to prevent unrealistically prolonged peak infectiousness. Finally, the function scales the viral load values based on whether the individual is currently in the early or late phase of infection, automatically setting the load to zero for anyone who has not yet been infected, has already recovered or died, or was never infected at all.
+
+### Transmission Parameter Breakdown
+
+* **`rel_trans` Initial Draw:** `rel_trans` is first drawn from the `beta_distribution` and multiplied by the odds ratio of transmissibility by each individual which currently is 1 for all age cutoff. `beta_dist` default is `dist='neg_binomial', par1=1.0, par2=0.45, step=0.01`.
+* **Sequence Tracker:** The `seq_tracker` will overwrite the `rel_trans` to `rel_trans` multiplied by the fitness value calculated. *(Question noted in notes: is this supposed to happen?)*
+* **`beta`:** A fixed value set by default to `0.016`, representing beta per symptomatic contact.
+* **`beta_distribution`:** Defined as `'neg_binomial'`, `par1=1.0`, `par2=0.45`, `step=0.01`. This is used to calculate the initial relative transmissibility by multiplying the `beta_distribution` by the odds ratio of transmissibility for each individual, which is currently 1 for all age cutoffs (10 bins).
+
+### Important Modifiers and Variant Adjustments
+
+* **Sequence Tracker:** If the sequence tracker is on, `rel_trans` is multiplied by the fitness value.
+* **Variant Recalculation:** For each variant, `beta` is recalculated using the formula:
+`self['beta'] * self['rel_beta'] * self['variant_pars'][variant_label]['rel_beta']`
+Here, `beta` is `0.016` (default), and `rel_beta` is defined per variant (e.g., alpha, delta).
+* **Layer-Specific Betas:** For each pair in a contact, betas are defined as the layer's beta (e.g., households, schools, and workplaces have their own specific beta values).
+
+---
+
+## 6. Final Calculations (`compute_trans_sus`)
+
+The final relative transmissibility and susceptibility are calculated through the function:
+
+`compute_trans_sus(prel_trans, prel_sus, inf_variant, sus, beta_layer, viral_load, symp, iso, quar, asymp_factor, iso_factor, quar_factor, sus_imm)`
+
+### Key Calculation Steps Include:
+
+* `f_asymp = symp + ~symp * asymp_factor`
+*(Asymptomatic factor; changes e.g. `[0,1]` with a factor of `0.8` to `[0.8, 1.0]`)*
+* `f_iso = ~iso + iso * iso_factor`
+*(Isolation factor; changes e.g. `[0,1]` with a factor of `0.2` to `[1, 0.2]`)*
+* `f_quar = ~quar + quar * quar_factor`
+*(Quarantine factor; changes e.g. `[0,1]` with a factor of `0.5` to `[1, 0.5]`)*
+* `rel_trans = rel_trans * inf * f_quar * f_asymp * f_iso * beta_layer * viral_load`
+*(Recalculate transmissibility)*
+* `rel_sus = rel_sus * sus * f_quar * (1-immunity_factors)`
+*(Recalculate susceptibility)*
