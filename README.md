@@ -81,7 +81,7 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * **Structure:**
 1. Microstructured household clustering (cluster size drawn from a Poisson distribution).
 2. Random connections made across the broader population.
-3. Random contacts assigned specifically within school and work age brackets. (Household contacts are structured; school/work networks are random).
+3. Random contacts assigned specifically within school and work age brackets (household contacts are structured; school/work networks are random).
 
 
 
@@ -117,7 +117,7 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 
 ### A. Viral Load Calculation (`compute_viral_load`)
 
-* Dynamically calculates relative transmissibility at timestep `t` based on infection duration (start date to recovery/death endpoint).
+* Dynamically calculates relative transmissibility at timestep $t$ based on infection duration (start date to recovery/death endpoint).
 * Splits timelines into a high-load early phase and a low-load late phase, bounded by a maximum cap (`high_cap`) to prevent unrealistic peak lengths.
 * Automatically sets viral load to `0` for uninfected, recovered, dead, or unaffected individuals.
 
@@ -129,7 +129,6 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * **Variant Adjustments:** Recalculated per variant using:
 
 $$\text{beta} \times \text{rel\_beta} \times \text{variant\_pars}[\text{variant\_label}][\text{rel\_beta}]$$
-
 
 * **Layer-Specific Betas:** Individual beta values are assigned per network layer (household, school, workplace, community).
 
@@ -143,27 +142,21 @@ Calculates final relative transmission and susceptibility values using the follo
 
 $$f_{\text{asymp}} = \text{symp} + \sim\text{symp} \times \text{asymp\_factor}$$
 
-
 * **Isolation Factor:**
 
 $$f_{\text{iso}} = \sim\text{iso} + \text{iso} \times \text{iso\_factor}$$
-
 
 * **Quarantine Factor:**
 
 $$f_{\text{quar}} = \sim\text{quar} + \text{quar} \times \text{quar\_factor}$$
 
-
 * **Final Transmissibility:**
 
 $$\text{rel\_trans} = \text{rel\_trans} \times \text{inf} \times f_{\text{quar}} \times f_{\text{asymp}} \times f_{\text{iso}} \times \text{beta\_layer} \times \text{viral\_load}$$
 
-
 * **Final Susceptibility:**
 
 $$\text{rel\_sus} = \text{rel\_sus} \times \text{sus} \times f_{\text{quar}} \times (1 - \text{immunity\_factors})$$
-
-
 
 ---
 
@@ -171,11 +164,11 @@ $$\text{rel\_sus} = \text{rel\_sus} \times \text{sus} \times f_{\text{quar}} \ti
 
 ### A. Population State Metrics
 
-* **Alive (`n_alive`):** $\text{Total Population} - \text{Total Deaths}$
-* **Naive (`n_naive`):** $\text{Total Population} - \text{Deaths} - \text{Recovered} - \text{Exposed}$
-* **Susceptible (`n_susceptible`):** $\text{Alive} - \text{Exposed} - (\text{count\_recov} \times \text{Cumulative Recoveries})$
-* **Pre-infectious (`n_preinfectious`):** $\text{Exposed} - \text{Currently Infectious}$
-* **Removed (`n_removed`):** $(\text{count\_recov} \times \text{Cumulative Recoveries}) + \text{Cumulative Deaths}$
+* **Alive (`n\_alive`):** $\text{Total Population} - \text{Total Deaths}$
+* **Naive (`n\_naive`):** $\text{Total Population} - \text{Deaths} - \text{Recovered} - \text{Exposed}$
+* **Susceptible (`n\_susceptible`):** $\text{Alive} - \text{Exposed} - (\text{count\_recov} \times \text{Cumulative Recoveries})$
+* **Pre-infectious (`n\_preinfectious`):** $\text{Exposed} - \text{Currently Infectious}$
+* **Removed (`n\_removed`):** $(\text{count\_recov} \times \text{Cumulative Recoveries}) + \text{Cumulative Deaths}$
 * **Prevalence:** $\frac{\text{Currently Exposed}}{\text{Alive}}$
 * **Incidence:** $\frac{\text{New Infections}}{\text{Susceptible}}$
 * **Fraction Vaccinated:** $\frac{\text{Vaccinated}}{\text{Alive}}$
@@ -187,18 +180,16 @@ $$\text{rel\_sus} = \text{rel\_sus} \times \text{sus} \times f_{\text{quar}} \ti
 
 $$\text{Days to Double} = \min\left( \text{window} \times \frac{\log(2)}{\log\left(\frac{\text{Infections}_t}{\text{Infections}_{t - \text{window}}}\right)}, \text{max\_doubling\_time} \right)$$
 
-
 * **Effective Reproduction Number ($R_{\text{eff}}$):**
 * **Daily Method:**
 
+
+
 $$\text{Mean Infectious Duration} \times \frac{\text{New Local Infections}}{\text{Currently Infectious}}$$
 
-
-
 *(Includes kernel smoothing for noise reduction).*
+
 * **Transmission Log Method (`infectious` / `outcome`):** Tracks direct person-to-person infections across the transmission tree, averaged over a rolling window.
-
-
 * **Generation Time (Serial Interval):**
 * **True Interval:** Days elapsed from source exposure to target exposure.
-* **Clinical Interval:** Days elapsed from source symptom onset(symptomatic) to target symptom onset.
+* **Clinical Interval:** Days elapsed from source symptom onset to target symptom onset.
