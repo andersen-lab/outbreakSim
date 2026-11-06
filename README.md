@@ -33,110 +33,172 @@ Covasim is an agent-based COVID-19 model. covasim4wastewater adds:
 * clinical and wastewater samplers, and amplicon read simulation with Bygul
 * an infection log for building transmission phylogenies
 
-# Definitions and Calculations
 
----
+# Covasim Model Architecture & Calculations
 
 ## 1. Population Setup & Generation
 
 * **Key Parameters:** `pop_size = 20e3`, `pop_infected = 20`, `pop_type = random`, `location = None (seattle)`
 * **Core Functions:** `make_people`, `assign_sewersheds`, `make_synthpop`, `make_randpop`
-* **Process:** These functions create people depending on the population type provided. Before generating people, the system checks if the user provided population data.
-* **Synthpop:** Population type `synthpop` uses the [synthpops GitHub repository](https://github.com/synthpops/synthpops). This only supports a few locations and is not being maintained anymore, but it outputs a structured synthetic population with realistic demographic details—such as age, sex, and household size—mapped onto realistic interaction networks across households, schools, workplaces, long-term care facilities, and general community spaces. Instead of generating random contacts, it uses real census data to simulate how people actually group and interact in everyday life, providing the underlying contact network that disease models use to track transmission.
+* **Process:** Generates agents based on the selected population type after verifying user-provided data.
+* **Synthpop (`pop_type = 'synthpop'`):**
+* Powered by the [synthpops GitHub repository](https://github.com/synthpops/synthpops).
+* *Note:* Limited location support and currently unmaintained.
+* *Output:* Outputs a structured synthetic population with demographics (age, sex, household size) mapped onto realistic interaction networks across households, schools, workplaces, long-term care facilities, and community spaces using real census data.
+
+
 
 ---
 
 ## 2. Contact Layers & Person Attributes
 
-* **Location Effects:** By default, when a location is specified, age and household size data are also used. If location is not specified, then Seattle data is used.
-* **Contact Layers:** There are 4 key contact types in the population:
+* **Location Effects:** Uses age and household size data for the specified location (defaults to Seattle if unspecified).
+* **Contact Layers:**
 * Household = `h`
 * Schools = `s`
 * Workplace = `w`
 * Random contact = `c`
+* *(Stored globally in `layers_defaults`)*
 
 
-* **Note:** `layers_defaults` holds these values for each contact type.
-* **Person Attributes:** Once created, each individual contains: `uid`, `age`, `sex`, and `contacts`.
-* **Prognoses & Spatial Data:** Prognoses are set by default for different age bins, along with regions and coordinates. Once people are created, they are also assigned a sewershed based on their coordinates.
+* **Person Attributes:** Each individual contains: `uid`, `age`, `sex`, and `contacts`.
+* **Prognoses & Spatial Data:** Default prognoses assigned by age bins alongside regions, coordinates, and sewershed assignments.
 
 ---
 
-## 3. Contacts
+## 3. Contact Generation Strategies
 
 * **Core Functions:** `make_random_contacts`, `make_hybrid_contacts`, `make_rank_based_contacts`
-* **`make_random_contacts`:** Every person needs on average $N$ contacts. By default, it uses a Poisson distribution centered at $N$ to decide how many contacts each person gets. If a dispersion factor is used, it switches to a negative binomial distribution to account for superspreading events. Dispersion is `None` by default.
-* **`make_hybrid_contacts`:** Makes networks across different social layers. Exact contact information is set by the `reset_layer_pars` function per `pop_type` (`h`, `s`, `w`, `c`), with school and work ages defined as `[6, 22]` and `[22, 65]` respectively.
 
-### Hybrid Contact Structure
+### A. Random Contacts (`make_random_contacts`)
 
-* It starts off with making contacts in the household (`make_microstructured_contacts` = clustering people into families with a cluster size drawn from a poisson distribution), then making random contacts between everyone (`make_random_contacts`).
-* Then it identifies the individuals that fall into work age and school age. From there, it creates random contacts for each of these groups. So household contacts are structured but not school or work places.
+* Assigns contacts around a mean value $N$ using a **Poisson distribution**.
+* Switches to a **negative binomial distribution** if a dispersion factor is active (default is `None`) to simulate superspreading events.
 
-### Rank Contact Structure
+### B. Hybrid Contacts (`make_hybrid_contacts`)
 
-* If the `pop_type` rank is used, it first makes sure that people have coordinates, if they do, we will convert lonlat to km using `lonlat_to_km`. If not, it will assign them coordinates using `assign_density_based_coords`.
-* Then the rank based contacts are calculated with a mean set as default `pars['contacts']` for "random" which is 20.
-* Given the current structure of the code, it does not look like dispersion can be defined as a parameter. The default for dispersion is none, in both `make_rand_contact` and `rank_based_contact`.
-* The logic is assigns coordinates based on a density raster file which is provided by the user.
+* Sets exact contact rules per layer via `reset_layer_pars` (`h`, `s`, `w`, `c`), with school age defined as `[6, 22]` and work age as `[22, 65]`.
+* **Structure:**
+1. Microstructured household clustering (cluster size drawn from a Poisson distribution).
+2. Random connections made across the broader population.
+3. Random contacts assigned specifically within school and work age brackets. (Household contacts are structured; school/work networks are random).
 
-### Dynamic Layers Note
 
-* It is important to note that we can also set layers to be dynamic, meaning that in the specific layer such as "h" the contacts stay the same throughout the simulation.
-* Default values for both random and hybrid is set to zero, meaning that in all layers the contacts stay the same and not change throughout the time.
+
+### C. Rank-Based Contacts (`make_rank_based_contacts`)
+
+* Requires coordinates; converts longitude/latitude to kilometers via `lonlat_to_km` or generates them via `assign_density_based_coords` using a user-provided density raster file.
+* Calculates rank-based contacts with a default mean of `20` (from `pars['contacts']`).
+* Dispersion parameter defaults to `None`.
+
+### D. Dynamic Layers Note
+
+* Layers can be set to dynamic, but the default for both random and hybrid models is `0` (static contacts that do not change over simulation time).
 
 ---
 
 ## 4. Rescaling
 
 * **Parameters:** `pop_scale = 1`, `scaled_pop = None`, `rescale = TRUE`, `rescale_threshold = 0.05`, `rescale_factor = 1.02`
-* **Function:** `rescale(self)`
-* **Dependencies:** `self.people.false('naive')` (who can get infected?), `self['pop_size']` (how many agents?)
-* **What it does:** In Covasim, **`pop_scale`** determines how many real people each simulated agent represents, giving you the total **`scaled_pop`** size. When **`rescale`** is turned on, the model watches for when too many agents catch the virus or get vaccinated—once that number hits the **`rescale_threshold`**, it uses the **`rescale_factor`** to prune non-susceptible agents and bump up the scale, keeping the simulation fast without running out of memory.
+* **Core Function:** `rescale(self)`
+* **Dependencies:** `self.people.false('naive')`, `self['pop_size']`
+* **Mechanism:**
+* `pop_scale` defines how many real individuals each simulated agent represents, determining the total `scaled_pop` size.
+* When `rescale` is enabled, the model monitors non-susceptible agents. Once infections/vaccinations hit the `rescale_threshold`, it applies the `rescale_factor` to prune agents and increase scale, optimizing memory and execution speed.
+
+
 
 ---
 
-## 5. Basic Disease Transmission
+## 5. Disease Transmission Mechanics
 
-* **Parameters:** `beta = 0.016`, `n_import = 0` (there will be a random number of infected cases drawn from a Poisson distribution even if set to zero), `beta_dist = 'neg_binomial'`, `par1 = 1.0`, `par2 = 0.45`, `step = 0.01`, `viral_dist = frac_time = 0.3`, `load_ratio = 2`, `high_cap = 4`, `asymp_factor = 1`
-* **What it does:** The probability of transmission from an *infectious* person to a *susceptible* person, also known as infectiousness or transmissibility. The overall transmission probability depends on the network *layer* two people are connected by, as well as the infected person's *viral load*, the susceptible person's age, and other factors.
+* **Parameters:** `beta = 0.016`, `n_import = 0` (random Poisson-drawn cases may still occur), `beta_dist = 'neg_binomial'`, `par1 = 1.0`, `par2 = 0.45`, `step = 0.01`, `viral_dist = frac_time = 0.3`, `load_ratio = 2`, `high_cap = 4`, `asymp_factor = 1`
+* **Core Concept:** Transmission probability from an infectious person to a susceptible person depends on network layer connectivity, viral load, susceptible age, and other modifiers.
 
-### Viral Load Calculation (`compute_viral_load`)
+### A. Viral Load Calculation (`compute_viral_load`)
 
-* The `compute_viral_load` function dynamically calculates the relative transmissibility of infected individuals at any given timestep `t` by modeling how viral load evolves over the course of an infection. It first determines each person's infection duration by evaluating their start date against their endpoint (either recovery or death), and then divides this timeline into an initial high-load phase and a subsequent low-load phase, subject to a maximum cap (`high_cap`) to prevent unrealistically prolonged peak infectiousness. Finally, the function scales the viral load values based on whether the individual is currently in the early or late phase of infection, automatically setting the load to zero for anyone who has not yet been infected, has already recovered or died, or was never infected at all.
+* Dynamically calculates relative transmissibility at timestep `t` based on infection duration (start date to recovery/death endpoint).
+* Splits timelines into a high-load early phase and a low-load late phase, bounded by a maximum cap (`high_cap`) to prevent unrealistic peak lengths.
+* Automatically sets viral load to `0` for uninfected, recovered, dead, or unaffected individuals.
 
-### Transmission Parameter Breakdown
+### B. Transmission Parameters & Modifiers
 
-* **`rel_trans` Initial Draw:** `rel_trans` is first drawn from the `beta_distribution` and multiplied by the odds ratio of transmissibility by each individual which currently is 1 for all age cutoff. `beta_dist` default is `dist='neg_binomial', par1=1.0, par2=0.45, step=0.01`.
-* **Sequence Tracker:** The `seq_tracker` will overwrite the `rel_trans` to `rel_trans` multiplied by the fitness value calculated. *(Question noted in notes: is this supposed to happen?)*
-* **`beta`:** A fixed value set by default to `0.016`, representing beta per symptomatic contact.
-* **`beta_distribution`:** Defined as `'neg_binomial'`, `par1=1.0`, `par2=0.45`, `step=0.01`. This is used to calculate the initial relative transmissibility by multiplying the `beta_distribution` by the odds ratio of transmissibility for each individual, which is currently 1 for all age cutoffs (10 bins).
+* **Initial Draw:** `rel_trans` is drawn from `beta_distribution` and multiplied by individual age-bin odds ratios (default is `1`).
+* **Sequence Tracker Override:** If active, `rel_trans` is multiplied by the calculated viral fitness value.
+* **Base Beta (`beta`):** Fixed default of `0.016` (beta per symptomatic contact).
+* **Variant Adjustments:** Recalculated per variant using:
 
-### Important Modifiers and Variant Adjustments
+$$\text{beta} \times \text{rel\_beta} \times \text{variant\_pars}[\text{variant\_label}][\text{rel\_beta}]$$
 
-* **Sequence Tracker:** If the sequence tracker is on, `rel_trans` is multiplied by the fitness value.
-* **Variant Recalculation:** For each variant, `beta` is recalculated using the formula:
-`self['beta'] * self['rel_beta'] * self['variant_pars'][variant_label]['rel_beta']`
-Here, `beta` is `0.016` (default), and `rel_beta` is defined per variant (e.g., alpha, delta).
-* **Layer-Specific Betas:** For each pair in a contact, betas are defined as the layer's beta (e.g., households, schools, and workplaces have their own specific beta values).
+
+* **Layer-Specific Betas:** Individual beta values are assigned per network layer (household, school, workplace, community).
 
 ---
 
-## 6. Final Calculations (`compute_trans_sus`)
+## 6. Final Transmissibility & Susceptibility (`compute_trans_sus`)
 
-The final relative transmissibility and susceptibility are calculated through the function:
+Calculates final relative transmission and susceptibility values using the following core multipliers:
 
-`compute_trans_sus(prel_trans, prel_sus, inf_variant, sus, beta_layer, viral_load, symp, iso, quar, asymp_factor, iso_factor, quar_factor, sus_imm)`
+* **Asymptomatic Factor:**
 
-### Key Calculation Steps Include:
+$$f_{\text{asymp}} = \text{symp} + \sim\text{symp} \times \text{asymp\_factor}$$
 
-* `f_asymp = symp + ~symp * asymp_factor`
-*(Asymptomatic factor; changes e.g. `[0,1]` with a factor of `0.8` to `[0.8, 1.0]`)*
-* `f_iso = ~iso + iso * iso_factor`
-*(Isolation factor; changes e.g. `[0,1]` with a factor of `0.2` to `[1, 0.2]`)*
-* `f_quar = ~quar + quar * quar_factor`
-*(Quarantine factor; changes e.g. `[0,1]` with a factor of `0.5` to `[1, 0.5]`)*
-* `rel_trans = rel_trans * inf * f_quar * f_asymp * f_iso * beta_layer * viral_load`
-*(Recalculate transmissibility)*
-* `rel_sus = rel_sus * sus * f_quar * (1-immunity_factors)`
-*(Recalculate susceptibility)*
+
+* **Isolation Factor:**
+
+$$f_{\text{iso}} = \sim\text{iso} + \text{iso} \times \text{iso\_factor}$$
+
+
+* **Quarantine Factor:**
+
+$$f_{\text{quar}} = \sim\text{quar} + \text{quar} \times \text{quar\_factor}$$
+
+
+* **Final Transmissibility:**
+
+$$\text{rel\_trans} = \text{rel\_trans} \times \text{inf} \times f_{\text{quar}} \times f_{\text{asymp}} \times f_{\text{iso}} \times \text{beta\_layer} \times \text{viral\_load}$$
+
+
+* **Final Susceptibility:**
+
+$$\text{rel\_sus} = \text{rel\_sus} \times \text{sus} \times f_{\text{quar}} \times (1 - \text{immunity\_factors})$$
+
+
+
+---
+
+## 7. Population Trackers & Epidemiological Outputs
+
+### A. Population State Metrics
+
+* **Alive (`n_alive`):** $\text{Total Population} - \text{Total Deaths}$
+* **Naive (`n_naive`):** $\text{Total Population} - \text{Deaths} - \text{Recovered} - \text{Exposed}$
+* **Susceptible (`n_susceptible`):** $\text{Alive} - \text{Exposed} - (\text{count\_recov} \times \text{Cumulative Recoveries})$
+* **Pre-infectious (`n_preinfectious`):** $\text{Exposed} - \text{Currently Infectious}$
+* **Removed (`n_removed`):** $(\text{count\_recov} \times \text{Cumulative Recoveries}) + \text{Cumulative Deaths}$
+* **Prevalence:** $\frac{\text{Currently Exposed}}{\text{Alive}}$
+* **Incidence:** $\frac{\text{New Infections}}{\text{Susceptible}}$
+* **Fraction Vaccinated:** $\frac{\text{Vaccinated}}{\text{Alive}}$
+* **By-Variant Metrics:** Variant-specific incidence and prevalence calculated via Einstein summation ($\text{einsum}$).
+
+### B. Epidemic Dynamics
+
+* **Doubling Time:** Calculated over a rolling window using exponential approximation:
+
+$$\text{Days to Double} = \min\left( \text{window} \times \frac{\log(2)}{\log\left(\frac{\text{Infections}_t}{\text{Infections}_{t - \text{window}}}\right)}, \text{max\_doubling\_time} \right)$$
+
+
+* **Effective Reproduction Number ($R_{\text{eff}}$):**
+* **Daily Method:**
+
+$$\text{Mean Infectious Duration} \times \frac{\text{New Local Infections}}{\text{Currently Infectious}}$$
+
+
+
+*(Includes kernel smoothing for noise reduction).*
+* **Transmission Log Method (`infectious` / `outcome`):** Tracks direct person-to-person infections across the transmission tree, averaged over a rolling window.
+
+
+* **Generation Time (Serial Interval):**
+* **True Interval:** Days elapsed from source exposure to target exposure.
+* **Clinical Interval:** Days elapsed from source symptom onset(symptomatic) to target symptom onset.
